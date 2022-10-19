@@ -5,19 +5,29 @@
 
     1. Global Variables
     2. Helper Functions
-    2.1. Debugging
-    2.2. Error handling
+        2.1. Debugging
+        2.2. Error handling
     3. Authentication Flow
-    3.1. Authorisation
-    3.2. Authentication with REST Token
-    3.2.1. Build token request payload
-    3.2.2. Request the token
-    3.2.3. Destructure the response
-    3.2.4 Get User Details
-    3.2.5. Upsert Logging Data Extension
-    3.2.6. Redirect to the frontend of the App with state
-    3.2.7. Handle authentication error
-    3.3. Authorisation Error
+        3.1. Authorisation
+        3.2. Authentication with REST Token
+            3.2.1. Build token request payload
+            3.2.2. Request the token
+            3.2.3. Destructure the response
+            3.2.4 Get User Details
+            3.2.5. Upsert Logging Data Extension
+            3.2.6. Redirect to the frontend of the App with state
+            3.2.7. Handle authentication error
+        3.3. Authorisation Error
+    4. Backend Flow
+        4.1. Get Post Data
+            4.1.1. Get the payload from POST call
+            4.1.2. Parse Stringified JSON back to Object
+        4.2. Authenticate the POST call
+            4.2.1 Get session code from POST payload
+            4.2.2. Check whether there is a matching token for the session
+            4.2.3. If no valid token, return error
+        4.3. Backend Logic
+        4.4. Backend Error
 
     -------------------------------------------------------------------------- */
 
@@ -164,7 +174,7 @@
             /* 4.2.2. Check whether there is a matching token for the session */
             var token = Platform.Function.Lookup(authDE, 'token', ['appName', 'session'], [appName, session]);
             var tokenExpire = Platform.Function.Lookup(authDE, 'tokenExpire', ['appName', 'token'], [appName, token]);
-            /* 2.3. If no valid token, return error */
+            /* 4.2.3. If no valid token, return error */
             if (Platform.Function.SystemDateToLocalDate(Platform.Function.Now()) > tokenExpire) {
                 throw { message: 'Session Timeout', description: 'The token is expired. Please refresh the session to use the application.' }
             };
