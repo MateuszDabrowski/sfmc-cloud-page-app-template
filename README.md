@@ -1,5 +1,9 @@
 # Salesforce Marketing Cloud Cloud Page App Templates
 
+Read more about [SFMC Cloud Page Apps](https://mateuszdabrowski.pl/docs/usecase/sfmc-cloud-page-apps/).
+
+Work in progress, more details soon :)
+
 ## Simple Cloud Page App
 
 Whole App on a single Cloud Page
@@ -19,8 +23,8 @@ App split between Cloud Page (front end) and Code Resource (back end) for better
 | createdDate | Date | Current date | | Yes |
 | token | Text | | 520 | Yes |
 | tokenExpire | Date | | | Yes |
-| userName | Text | 100 | | Yes |
-| userEmail | Text | 254 | | Yes |
+| userName | Text | | 100 | Yes |
+| userEmail | Text | |  254 | Yes |
 
 ### ErrorLog
 
@@ -28,8 +32,6 @@ App split between Cloud Page (front end) and Code Resource (back end) for better
 |--|--|--|--|--|
 | 🔑 id | Text | | 36 | No |
 | appName | Text | | 100 | Yes |
-| errorMessage | Text | 2000 | | Yes |
-| errorDescription | Text | 2000 | | Yes |
+| errorMessage | Text | | 2000 | Yes |
+| errorDescription | Text | | 2000 | Yes |
 | errorDate | Date | Current date | | Yes |
-
-Read more about [SFMC Cloud Page Apps](https://mateuszdabrowski.pl/docs/usecase/sfmc-cloud-page-apps/).
