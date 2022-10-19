@@ -1,0 +1,191 @@
+<script runat="server">
+    /* -------------------------------------------------------------------------
+
+    Authenticates each visitor to limit access only to SFMC logged-in users.
+
+    1. Global Variables
+    2. Helper Functions
+    2.1. Debugging
+    2.2. Error handling
+    3. Authentication Flow
+    3.1. Authorisation
+    3.2. Authentication with REST Token
+    3.2.1. Build token request payload
+    3.2.2. Request the token
+    3.2.3. Destructure the response
+    3.2.4 Get User Details
+    3.2.5. Upsert Logging Data Extension
+    3.2.6. Redirect to the frontend of the App with state
+    3.2.7. Handle authentication error
+    3.3. Authorisation Error
+
+    -------------------------------------------------------------------------- */
+
+    Platform.Load('core', '1');
+
+    /* ----------------------------------------------------------------------- */
+    /* ---------------------- 1. GLOBAL VARIABLES ---------------------------- */
+    /* ----------------------------------------------------------------------- */
+
+    var method = Platform.Request.Method();
+
+    var debugging = true;
+    var appName = 'CLOUD_APP_NAME';
+    var appURL = 'APP_CLOUD_PAGE_URL';
+    var backendURL = 'APP_CODE_RESOURCE_URL';
+
+    var clientID = 'CLIENT_ID';
+    var clientSecret = 'CLIENT_SECRET';
+    var clientBase = 'API_BASE_URI';
+    var authDE = 'AUTHENTICATION_DATA_EXTENSION';
+
+    var state = Platform.Request.GetQueryStringParameter('state');
+
+    var errorMessage = Platform.Request.GetQueryStringParameter('error');
+    var errorDescription = Platform.Request.GetQueryStringParameter('error_description');
+    var errorDE = 'ERROR_DATA_EXTENSION';
+    var errorURL = 'ERROR_CLOUD_PAGE_URL';
+
+    /* ----------------------------------------------------------------------- */
+    /* ---------------------- 2. HELPER FUNCTIONS ---------------------------- */
+    /* ----------------------------------------------------------------------- */
+
+    /* ---------------------- 2.1. Debugging --------------------------------- */
+
+    /**
+    * @function debugValue
+    * @description Outputs provided description and SSJS value to front-end in a type-safe & consistent way
+    * @param {string} description - Describes meaning of the second parameter in the output
+    * @param {*} value - The value that needs to be debugged
+    */
+    function debugValue(description, value) {
+        Write(description + ': ' + (typeof value == 'object' ? Stringify(value) : value) + '\n\n');
+    };
+
+    /* ---------------------- 2.2. Error handling ---------------------------- */
+
+    /**
+    * @function handleError
+    * @description Adds the error with context to error logging Data Extension and redirects to error page.
+    * @param {Object} error - The caught error object. Can come from the try/catch block or be manually created.
+    * @param {string} error.message - First error key stores short error message describing the issue.
+    * @param {string} error.description - Second error key stores detailed error path helping with root cause analysis
+    */
+    function handleError(error) {
+        if (debugging) {
+            debugValue('Found error', error);
+        } else {
+            // Remember that if your Logging Data Extension is in Shared Folder, you need to add the "ENT." prefix to name
+            Platform.Function.InsertData(errorDE, ['id', 'appName', 'errorMessage', 'errorDescription'], [GUID(), appName, error.message, error.description]);
+            Platform.Response.Redirect(errorURL + '?error=' + error.message + '&error_description=' + error.description);
+        };
+    };
+
+    if (method == 'GET') {
+
+        /* ------------------------------------------------------------------- */
+        /* -------------------- 3. AUTHENTICATION FLOW ----------------------- */
+        /* ------------------------------------------------------------------- */
+
+        /* ---------------------- 3.1. Authorization ------------------------- */
+
+        if (!state && !errorMessage) {
+            state = GUID();
+            Platform.Response.Redirect('https://' + clientBase + '.auth.marketingcloudapis.com/v2/authorize?response_type=code&client_id=' + clientID + '&redirect_uri=' + backendURL + '&state=' + state);
+
+            /* -------------------- 3.2. Authentication ---------------------- */
+
+        } else if (state) {
+            /* 3.2.1. Build token request payload */
+            var code = Platform.Request.GetQueryStringParameter('code');
+            var payload = {
+                grant_type: 'authorization_code',
+                code: code,
+                client_id: clientID,
+                client_secret: clientSecret,
+                redirect_uri: backendURL
+            };
+            /* 3.2.2. Request the token */
+            var response = HTTP.Post('https://' + clientBase + '.auth.marketingcloudapis.com/v2/token', 'application/json', Stringify(payload));
+            /* 3.2.3. Destructure the response */
+            if (response.StatusCode == 200) {
+                var parsedResponse = Platform.Function.ParseJSON(response.Response[0]);
+                var accessToken = parsedResponse.access_token;
+                var tokenExpire = Platform.Function.SystemDateToLocalDate(Platform.Function.Now());
+                tokenExpire.setMinutes(tokenExpire.getMinutes() + 18);
+
+                /* 3.2.4. Get User Details */
+                response = HTTP.Get('https://' + clientBase + '.auth.marketingcloudapis.com/v2/userinfo', ['Authorization'], ['Bearer ' + accessToken]);
+                if (debugging) debugValue('UserInfo Response', response)
+                userName = Platform.Function.ParseJSON(response.Content).user.name;
+                userEmail = Platform.Function.ParseJSON(response.Content).user.email;
+
+                /* 3.2.5. Upsert Authentication Logging Data Extension */
+                Platform.Function.UpsertData(authDE, ['session'], [state],
+                    ['appName', 'token', 'tokenExpire', 'userName', 'userEmail'],
+                    [appName, accessToken, tokenExpire, userName, userEmail]
+                );
+
+                /* 3.2.6. Redirect to the frontend of the App with state */
+                Platform.Response.Redirect(appURL + '?s=' + state);
+
+                /* 3.2.7. Handle authentication error */
+            } else {
+                handleError({ message: 'Authentication Failed', description: 'Status: ' + response.StatusCode })
+            };
+
+            /* ------------------- 3.3. Authorization Error ------------------ */
+
+        } else {
+            handleError({ message: errorMessage, description: errorDescription });
+        };
+    } else if (method == 'POST') {
+
+        /* ------------------------------------------------------------------- */
+        /* ----------------------- 4. BACKEND FLOW --------------------------- */
+        /* ------------------------------------------------------------------- */
+
+        var response;
+
+        try {
+
+            /* ---------------------- 4.1. Get Post Data --------------------- */
+
+            /* 4.1.1. Get the payload from POST call */
+            var postedData = Platform.Request.GetPostData();
+
+            /* 4.1.2. Parse Stringified JSON back to Object */
+            var parsedData = Platform.Function.ParseJSON(postedData);
+
+            /* --------------- 4.2. Authenticate the POST call --------------- */
+
+            /* 4.2.1 Get session code from POST payload */
+            var session = parsedData.session;
+            /* 4.2.2. Check whether there is a matching token for the session */
+            var token = Platform.Function.Lookup(authDE, 'token', ['appName', 'session'], [appName, session]);
+            var tokenExpire = Platform.Function.Lookup(authDE, 'tokenExpire', ['appName', 'token'], [appName, token]);
+            /* 2.3. If no valid token, return error */
+            if (Platform.Function.SystemDateToLocalDate(Platform.Function.Now()) > tokenExpire) {
+                throw { message: 'Session Timeout', description: 'The token is expired. Please refresh the session to use the application.' }
+            };
+
+            /* --------------------- 4.3. Backend Logic ---------------------- */
+
+            switch (parsedData.action) {
+
+                case 'myActionCall':
+                    response = { message: 'Hello World' };
+                    break;
+
+            };
+
+            /* --------------------- 4.4. Backend Error ---------------------- */
+        } catch (error) {
+            handleError({ message: errorMessage, description: errorDescription });
+            response = error;
+        };
+
+        var stringifiedResponse = Stringify(response);
+    }
+</script>
+<ctrl:var name=stringifiedResponse />

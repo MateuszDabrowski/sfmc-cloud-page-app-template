@@ -1,0 +1,94 @@
+<script runat="server">
+
+    /* ------------------------ 1. Global Variables -------------------------- */
+    var appName = 'CLOUD_APP_NAME';
+    var authDE = 'AUTHENTICATION_DATA_EXTENSION';
+    var backendURL = 'APP_CODE_RESOURCE_URL';
+
+    /* ------------------------- 2. Authentication --------------------------- */
+
+    /* 2.1. Get session code from query string */
+    var session = Platform.Request.GetQueryStringParameter('s');
+    /* 2.2. Check whether there is a matching token for the session */
+    var token = Platform.Function.Lookup(authDE, 'token', ['appName', 'session'], [appName, session]);
+    var tokenExpire = Platform.Function.Lookup(authDE, 'tokenExpire', ['appName', 'token'], [appName, token]);
+    /* 2.3. If no valid token, redirect to backend authentication */
+    if (token == undefined || Platform.Function.SystemDateToLocalDate(Platform.Function.Now()) > tokenExpire) {
+        Platform.Response.Redirect(backendURL);
+    };
+</script>
+
+<section>
+
+    <button type="button">Click Me!</button>
+    <label for="output">Response: </label>
+    <input type="text" id="output" name="output" />
+
+</section>
+
+<script>
+    /* ------------------------ 1. Global Variables -------------------------- */
+
+    const debugging = true;
+    const session = '<ctrl:var name=session />';
+    var button = document.querySelector('button');
+    var output = document.querySelector('#output');
+
+    /* ------------------------ 2. Helper Functions -------------------------- */
+
+    /**
+     * @function request
+     * @description Wrapper for POST call to backend
+     * @param {Object} payload - POST payload
+     * @returns {Promise} Promise object represents response JSON from backend
+     */
+    function request(payload) {
+        return new Promise(function(resolve, reject) {
+            const xhr = new XMLHttpRequest();
+            xhr.timeout = 30 * 1000;
+            xhr.open('POST', '<ctrl:var name=backendURL/>', true);
+            xhr.setRequestHeader('Content-type', 'application/json');
+            xhr.onload = () => {
+                if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 400)) {
+                    resolve(JSON.parse(xhr.response))
+                } else {
+                    reject(xhr.status)
+                }
+            }
+            xhr.onerror = () => {
+                if (debugging) console.log('Connection Error')
+            }
+            xhr.ontimeout = () => {
+                if (debugging) console.log('Request Timed Out')
+            };
+            xhr.send(JSON.stringify(payload));
+        })
+    }
+
+    /**
+     * @function postData
+     * @description POST request handler
+     * @param {Object} payload - POST payload
+     * @returns
+     */
+    async function postData(payload) {
+        if (debugging) console.log('Processing');
+
+        let response = await request(payload);
+
+        if (debugging) console.log(`${payload.action} Response: ${JSON.stringify(response)}`)
+
+        return response
+    }
+
+    /* ------------------------- 3. Event Listeners -------------------------- */
+
+    button.addEventListener('click', () => {
+        postData({
+            action: 'myActionCall',
+            session
+        }).then(response => {
+            output.value = response.message;
+        })
+    })
+</script>
