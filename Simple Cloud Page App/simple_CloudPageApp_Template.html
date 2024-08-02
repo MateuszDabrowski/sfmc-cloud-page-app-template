@@ -89,7 +89,7 @@
 
         /* ---------------------- 3.2. Authentication ---------------------------- */
 
-    } else if (state) {
+    } else if (state && !errorMessage) {
         /* 3.2.1. Build token request payload */
         var code = Platform.Request.GetQueryStringParameter('code');
         var payload = {
