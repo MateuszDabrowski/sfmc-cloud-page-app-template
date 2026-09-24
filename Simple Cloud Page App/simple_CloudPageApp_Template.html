@@ -15,8 +15,10 @@
             3.2.3. Destructure the response
             3.2.4 Get User Details
             3.2.5. Upsert Logging Data Extension
-            3.2.6. Handle authentication error
+            3.2.6. Mark the visitor as authenticated
+            3.2.7. Handle authentication error
         3.3. Authorisation Error
+    4. Protected content (rendered only for authenticated visitors)
 
     -------------------------------------------------------------------------- */
 
@@ -55,7 +57,7 @@
     * @param {*} value - The value that needs to be debugged
     */
     function debugValue(description, value) {
-        Write(description + ': ' + (typeof value == 'object' ? Stringify(value) : value) + '<br><br>');
+        Write(htmlEscape(description + ': ' + (typeof value == 'object' ? Stringify(value) : value)) + '<br><br>');
     };
 
     /* ---------------------- 2.2. Error handling ---------------------------- */
@@ -67,15 +69,80 @@
     * @param {string} error.message - First error key stores short error message describing the issue.
     * @param {string} error.description - Second error key stores detailed error path helping with root cause analysis
     */
+    function logError(error) {
+        // Remember that if your Logging Data Extension is in Shared Folder, you need to add the "ENT." prefix to name
+        try {
+            Platform.Function.InsertData(errorDE, ['id', 'appName', 'errorMessage', 'errorDescription'], [GUID(), appName, String(error.message).substring(0, 2000), String(error.description).substring(0, 2000)]);
+        } catch (logFailure) {
+            // A failed log write must never hide the original error
+        };
+    };
+
     function handleError(error) {
         if (debugging) {
             debugValue('Found error', error);
         } else {
-            // Remember that if your Logging Data Extension is in Shared Folder, you need to add the "ENT." prefix to name
-            Platform.Function.InsertData(errorDE, ['id', 'appName', 'errorMessage', 'errorDescription'], [GUID(), appName, error.message, error.description]);
-            Platform.Response.Redirect(errorURL + '?error=' + error.message + '&error_description=' + error.description);
+            logError(error);
+            Platform.Response.Redirect(errorURL + '?error=' + encodeParam(error.message) + '&error_description=' + encodeParam(error.description));
         };
     };
+    /**
+    * @function encodeParam
+    * @description Percent-encodes a value for a URL query string (UTF-8, RFC 3986 unreserved characters kept).
+    * @param {*} value
+    * @returns {string}
+    */
+    function encodeParam(value) {
+        var text = String(value == undefined ? '' : value);
+        var hex = '0123456789ABCDEF';
+        var result = '';
+        for (var i = 0; i < text.length; i++) {
+            var ch = text.charAt(i);
+            var code = text.charCodeAt(i);
+            if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+                result += ch;
+            } else {
+                var bytes = code < 128 ? [code] : (code < 2048 ? [0xC0 | (code >> 6), 0x80 | (code & 0x3F)] : [0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F)]);
+                for (var b = 0; b < bytes.length; b++) {
+                    result += '%' + hex.charAt((bytes[b] >> 4) & 0xF) + hex.charAt(bytes[b] & 0xF);
+                }
+            }
+        }
+        return result;
+    };
+
+    /**
+    * @function htmlEscape
+    * @description Escapes a value for safe output into HTML.
+    * @param {*} value
+    * @returns {string}
+    */
+    function htmlEscape(value) {
+        return String(value == undefined ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+
+    /**
+    * @function isSessionId
+    * @description True when the value has the shape of a GUID, which is the only shape a session id or state can take.
+    * @param {*} value
+    * @returns {boolean}
+    */
+    function isSessionId(value) {
+        return value != undefined && /^[0-9a-fA-F-]{36}$/.test(String(value));
+    };
+
+    /**
+    * @function isExpired
+    * @description Compares a tokenExpire value (Date or date string, depending on how the platform returns it) with now.
+    * @param {*} tokenExpire
+    * @returns {boolean} true when the value is missing, unreadable or in the past
+    */
+    function isExpired(tokenExpire) {
+        var expireDate = typeof tokenExpire == 'string' ? new Date(tokenExpire) : tokenExpire;
+        if (expireDate == undefined || isNaN(expireDate.getTime())) return true;
+        return Platform.Function.SystemDateToLocalDate(Platform.Function.Now()).getTime() > expireDate.getTime();
+    };
+
 
     /* ----------------------------------------------------------------------- */
     /* ---------------------- 3. AUTHENTICATION FLOW ------------------------- */
@@ -85,9 +152,12 @@
 
     if (!state && !errorMessage) {
         state = GUID();
-        Platform.Response.Redirect('https://' + clientBase + '.auth.marketingcloudapis.com/v2/authorize?response_type=code&client_id=' + clientID + '&redirect_uri=' + appURL + '&state=' + state);
+        Platform.Response.Redirect('https://' + clientBase + '.auth.marketingcloudapis.com/v2/authorize?response_type=code&client_id=' + clientID + '&redirect_uri=' + encodeParam(appURL) + '&state=' + state);
 
         /* ---------------------- 3.2. Authentication ---------------------------- */
+
+    } else if (state && !errorMessage && !isSessionId(state)) {
+        handleError({ message: 'Invalid sign-in request', description: 'The state parameter is not a valid GUID.' });
 
     } else if (state && !errorMessage) {
         /* 3.2.1. Build token request payload */
@@ -111,16 +181,22 @@
             /* 3.2.4. Get User Details */
             response = HTTP.Get('https://' + clientBase + '.auth.marketingcloudapis.com/v2/userinfo', ['Authorization'], ['Bearer ' + accessToken]);
             if (debugging) debugValue('UserInfo Response', response)
-            userName = Platform.Function.ParseJSON(response.Content).user.name;
-            userEmail = Platform.Function.ParseJSON(response.Content).user.email;
+            var userName = Platform.Function.ParseJSON(response.Content).user.name;
+            var userEmail = Platform.Function.ParseJSON(response.Content).user.email;
 
-            /* 3.2.5. Upsert Authentication Logging Data Extension */
-            Platform.Function.UpsertData(authDE, ['session'], [state],
+            /* 3.2.5. Upsert Authentication Logging Data Extension.
+               The row is keyed by a fresh session id minted here, never by `state`: whoever starts
+               the sign-in knows `state`, so it must never identify the signed-in user. */
+            var session = GUID();
+            Platform.Function.UpsertData(authDE, ['session'], [session],
                 ['appName', 'token', 'tokenExpire', 'userName', 'userEmail'],
                 [appName, accessToken, tokenExpire, userName, userEmail]
             );
 
-            /* 3.2.6. Handle authentication error */
+            /* 3.2.6. Mark the visitor as authenticated for the AMPscript gate around the content below */
+            Variable.SetValue('@appAuthenticated', 'true');
+
+            /* 3.2.7. Handle authentication error */
         } else {
             handleError({ message: 'Authentication Failed', description: 'Status: ' + response.StatusCode })
         };
@@ -132,6 +208,11 @@
     };
 </script>
 
-<!-- The Cloud Page App micro SSO solution will secure anything you create below -->
+%%[ /* 4. Protected content: rendered only after a successful sign-in, even when debugging is on or a redirect does not stop the page */ ]%%
+%%[ IF @appAuthenticated == 'true' THEN ]%%
+
+<!-- The Cloud Page App micro SSO solution secures anything you create between IF and ENDIF -->
 
 Hello World!
+
+%%[ ENDIF ]%%

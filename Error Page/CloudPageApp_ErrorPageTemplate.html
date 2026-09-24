@@ -1,10 +1,23 @@
+<script runat="server">
+    /* The query string is attacker-controlled: escape it before it reaches the page, or any link to this
+       page could run script on your Cloud Pages domain. */
+    function htmlEscape(value) {
+        return String(value == undefined ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+    function queryValue(name, maxLength) {
+        var value = Platform.Request.GetQueryStringParameter(name);
+        return htmlEscape(value == undefined ? '' : String(value).substring(0, maxLength));
+    };
+    var errorMessage = queryValue('error', 200);
+    var errorDescription = queryValue('error_description', 500);
+</script>
 <h1
     style="color: rgb(32, 32, 32); font-family: arial; font-size: 72px; font-style: normal; font-weight: bold; line-height: 1; text-align: center;">
     We found a problem</h1>
 <h2
     style="color: rgb(32, 32, 32); font-family: arial; font-style: normal; font-weight: bold; line-height: 1; text-align: center;">
-    <ctrl:eval>Platform.Request.GetQueryStringParameter('error');</ctrl:eval>
+    <ctrl:var name=errorMessage />
 </h2>
 <p style="color: rgb(32, 32, 32); font-family: arial; font-style: normal; line-height: 1; text-align: center;">
-    <ctrl:eval>Platform.Request.GetQueryStringParameter('error_description');</ctrl:eval>
+    <ctrl:var name=errorDescription />
 </p>
