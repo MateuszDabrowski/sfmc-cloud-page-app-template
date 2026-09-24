@@ -1,5 +1,7 @@
 <script runat="server">
 
+    Platform.Load('core', '1');
+
     /* ------------------------ 1. Global Variables -------------------------- */
     var appName = 'CLOUD_APP_NAME';
     var authDE = 'AUTHENTICATION_DATA_EXTENSION';
@@ -7,16 +9,27 @@
 
     /* ------------------------- 2. Authentication --------------------------- */
 
-    /* 2.1. Get session code from query string */
+    /* 2.1. Get session code from query string; only a GUID-shaped value is ever used */
     var session = Platform.Request.GetQueryStringParameter('s');
-    /* 2.2. Check whether there is a matching token for the session */
-    var token = Platform.Function.Lookup(authDE, 'token', ['appName', 'session'], [appName, session]);
-    var tokenExpire = Platform.Function.Lookup(authDE, 'tokenExpire', ['appName', 'token'], [appName, token]);
+    var authenticated = false;
+    if (session != undefined && /^[0-9a-fA-F-]{36}$/.test(String(session))) {
+        /* 2.2. Check whether there is a matching, unexpired token for the session */
+        var token = Platform.Function.Lookup(authDE, 'token', ['appName', 'session'], [appName, session]);
+        var tokenExpire = Platform.Function.Lookup(authDE, 'tokenExpire', ['appName', 'session'], [appName, session]);
+        var expireDate = typeof tokenExpire == 'string' ? new Date(tokenExpire) : tokenExpire;
+        authenticated = !!token && expireDate != undefined && !isNaN(expireDate.getTime()) &&
+            Platform.Function.SystemDateToLocalDate(Platform.Function.Now()).getTime() < expireDate.getTime();
+    };
     /* 2.3. If no valid token, redirect to backend authentication */
-    if (token == undefined || Platform.Function.SystemDateToLocalDate(Platform.Function.Now()) > tokenExpire) {
+    if (authenticated) {
+        Variable.SetValue('@appAuthenticated', 'true');
+    } else {
         Platform.Response.Redirect(backendURL);
     };
 </script>
+
+%%[ /* The app renders only for a valid session, even if a redirect does not stop the page */ ]%%
+%%[ IF @appAuthenticated == 'true' THEN ]%%
 
 <section>
 
@@ -92,3 +105,5 @@
         })
     })
 </script>
+
+%%[ ENDIF ]%%
