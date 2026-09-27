@@ -169,8 +169,14 @@
             client_secret: clientSecret,
             redirect_uri: appURL
         };
-        /* 3.2.2. Request the token */
-        var response = HTTP.Post('https://' + clientBase + '.auth.marketingcloudapis.com/v2/token', 'application/json', Stringify(payload));
+        /* 3.2.2. Request the token. HTTP.Post throws when the token request is refused (for example a wrong
+        Client Secret), so the failure is caught here and ends in the Authentication Failed branch below. */
+        var response;
+        try {
+            response = HTTP.Post('https://' + clientBase + '.auth.marketingcloudapis.com/v2/token', 'application/json', Stringify(payload));
+        } catch (tokenError) {
+            response = { StatusCode: 'request refused - ' + String(tokenError && tokenError.message) };
+        };
         /* 3.2.3. Destructure the response */
         if (response.StatusCode == 200) {
             var parsedResponse = Platform.Function.ParseJSON(response.Response[0]);
